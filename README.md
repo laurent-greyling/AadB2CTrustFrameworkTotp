@@ -98,6 +98,7 @@ For the purpose of this document
 - User should be able to change own password
 - Custom RBAC should be implemented for a user (special flow)
 - User only uses Authenticator App for MFA
+- Banned password list - can be expanded (see `TrustFrameworkExtension.xml` for current)
 
 ## Add signing and encryption keys for Identity Experience Framework applications
 
@@ -185,6 +186,7 @@ The folder `TOTP_Rbac` contains the custom template for signin with features for
 - MFA with authentication app
 - Forgot password flow
 - User cannot sign-up only sign-in after invite
+- Banned password list - can be expanded (see `TrustFrameworkExtension.xml` for current)
 
 To get the full set of custom templates, unmodified for this portion, you can go to:
 

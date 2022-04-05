@@ -132,9 +132,80 @@
           <DataType>string</DataType>        
       </ClaimType>
 
+      <!--Banned password-->
+      <ClaimType Id="dummy">
+        <DisplayName>hide me</DisplayName>
+        <DataType>string</DataType>
+      </ClaimType>
+      <ClaimType Id="dummyTrue">
+        <DisplayName>hide me</DisplayName>
+        <DataType>string</DataType>
+      </ClaimType>
+      <ClaimType Id="bannedPassword">
+        <DisplayName>bannedPassword</DisplayName>
+        <DataType>string</DataType>
+      </ClaimType>
+      <ClaimType Id="banned">
+        <DisplayName>bannedPassword</DisplayName>
+        <DataType>boolean</DataType>
+      </ClaimType>
+
       <!--End of TOTP Claims-->
     </ClaimsSchema>
     <ClaimsTransformations>
+          <!-- Compares the new password to these input values to determine if it is on the banned list.
+            If there is a match bannedPassword=true. If there is not match, bannedPassword does not exist
+            in the claimes pipeline -->
+        <ClaimsTransformation Id="passwordToMatchBanList" TransformationMethod="LookupValue">
+          <InputClaims>
+            <InputClaim ClaimTypeReferenceId="newPassword" TransformationClaimType="inputParameterId" />
+          </InputClaims>
+          <InputParameters>
+            <InputParameter Id="Password!" DataType="string" Value="true" />
+            <InputParameter Id="P@ssw0rd!" DataType="string" Value="true" />
+            <InputParameter Id="Pa$$word" DataType="string" Value="true" />
+            <InputParameter Id="Passw0rd" DataType="string" Value="true" />
+            <InputParameter Id="P@a$$w0rd" DataType="string" Value="true" />
+            <InputParameter Id="P@a$$w0rd!" DataType="string" Value="true" />
+            <InputParameter Id="qwerty!1" DataType="string" Value="true" />
+            <InputParameter Id="qwerty@1" DataType="string" Value="true" />
+            <InputParameter Id="qw3rty!" DataType="string" Value="true" />
+            <InputParameter Id="qw3rty@" DataType="string" Value="true" />            
+            <InputParameter Id="errorOnFailedLookup" DataType="boolean" Value="false" />
+          </InputParameters>
+          <OutputClaims>
+            <OutputClaim ClaimTypeReferenceId="bannedPassword" TransformationClaimType="outputClaim" />
+          </OutputClaims>
+        </ClaimsTransformation>
+
+        <!-- Compares bannedPassword with dummy claim set to True. If these match then we have a banned password.
+					If they dont match, then the banned claim is output as false. This is to counter the fact
+					that the lookup claimsTransformation does not output a claim when there isnt a match -->
+      <ClaimsTransformation Id="CheckBannedPasswordValue" TransformationMethod="CompareClaims">
+        <InputClaims>
+          <InputClaim ClaimTypeReferenceId="bannedPassword" TransformationClaimType="inputClaim1" />
+          <InputClaim ClaimTypeReferenceId="dummyTrue" TransformationClaimType="inputClaim2" />
+        </InputClaims>
+        <InputParameters>
+          <InputParameter Id="operator" DataType="string" Value="EQUAL" />
+          <InputParameter Id="ignoreCase" DataType="string" Value="true" />
+        </InputParameters>
+        <OutputClaims>
+          <OutputClaim ClaimTypeReferenceId="banned" TransformationClaimType="outputClaim" />
+        </OutputClaims>
+      </ClaimsTransformation>
+
+      <!-- Compares the value of banned to false. If banned is false, then no error is thrown, the user did
+				not use a banned pwd. If banned is true, then it will not match to "false" and thus we throw an error
+				that the password is weak -->
+      <ClaimsTransformation Id="AssertBannedPasswordFalse" TransformationMethod="AssertBooleanClaimIsEqualToValue">
+        <InputClaims>
+          <InputClaim ClaimTypeReferenceId="banned" TransformationClaimType="inputClaim" />
+        </InputClaims>
+        <InputParameters>
+          <InputParameter Id="valueToCompareTo" DataType="boolean" Value="false" />
+        </InputParameters>
+      </ClaimsTransformation>
 
       <ClaimsTransformation Id="CompareOldAndNewPassword" TransformationMethod="CompareClaims">
           <InputClaims>
@@ -343,16 +414,19 @@
   <ClaimsProvider>
       <DisplayName>Self Asserted</DisplayName>
       <TechnicalProfiles>
+
         <!--Password reset-->
         <TechnicalProfile Id="SelfAsserted-ForcePasswordReset-ExpiredPassword">
           <DisplayName>Password Expired</DisplayName>
           <Protocol Name="Proprietary" Handler="Web.TPEngine.Providers.SelfAssertedAttributeProvider, Web.TPEngine, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"/>
           <Metadata>
+            <Item Key="setting.retryLimit">10</Item>
             <Item Key="ContentDefinitionReferenceId">api.selfasserted</Item>
-            <Item Key="UserMessageIfClaimsTransformationBooleanValueIsNotEqual">Please enter a different password</Item>
+            <Item Key="UserMessageIfClaimsTransformationBooleanValueIsNotEqual">This password is too weak, try another</Item>
           </Metadata>
           <InputClaims>
-            <InputClaim ClaimTypeReferenceId="userMsg" DefaultValue=""/>
+            <InputClaim ClaimTypeReferenceId="objectId" />
+            <InputClaim ClaimTypeReferenceId="dummyTrue" DefaultValue="true" />
           </InputClaims>
           <DisplayClaims>
             <DisplayClaim ClaimTypeReferenceId="userMsg"/>
@@ -362,17 +436,40 @@
           </DisplayClaims>
           <OutputClaims>
             <OutputClaim ClaimTypeReferenceId="objectId"/>
+            <OutputClaim ClaimTypeReferenceId="newPassword" Required="true" />
+            <OutputClaim ClaimTypeReferenceId="reenterPassword" Required="true" />
           </OutputClaims>
           <ValidationTechnicalProfiles>
             <!-- 1) validate the old password. 2) Assert whether the new password is different than the old one.
                  3) get the user object ID 4) persist the new password to the directory, and reset the force reset password next logon. -->
-            <ValidationTechnicalProfile ReferenceId="login-NonInteractive"/>
+            <ValidationTechnicalProfile ReferenceId="login-NonInteractive"/>                        
             <ValidationTechnicalProfile ReferenceId="ThrowErrorWhenPassowrdIsSame"/>
             <ValidationTechnicalProfile ReferenceId="AAD-UserReadUsingSignInName"/>
-            <ValidationTechnicalProfile ReferenceId="AAD-UserWritePasswordUsingObjectId-ResetNextLogin"/>
+            <ValidationTechnicalProfile ReferenceId="CheckPassword" ContinueOnError="false" />
+            <ValidationTechnicalProfile ReferenceId="AAD-UserWritePasswordUsingObjectId-ResetNextLogin">
+              <Preconditions>
+                <Precondition Type="ClaimEquals" ExecuteActionsIf="true">
+                  <Value>banned</Value>
+                  <Value>True</Value>
+                  <Action>SkipThisValidationTechnicalProfile</Action>
+                </Precondition>
+              </Preconditions>
+            </ValidationTechnicalProfile>                              
           </ValidationTechnicalProfiles>
           <UseTechnicalProfileForSessionManagement ReferenceId="SM-Noop"/>
         </TechnicalProfile>
+        <TechnicalProfile Id="CheckPassword">
+          <DisplayName>Check password</DisplayName>
+          <Protocol Name="Proprietary" Handler="Web.TPEngine.Providers.ClaimsTransformationProtocolProvider, Web.TPEngine, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" />
+          <OutputClaims>
+            <OutputClaim ClaimTypeReferenceId="dummy" />
+          </OutputClaims>
+          <OutputClaimsTransformations>
+            <OutputClaimsTransformation ReferenceId="passwordToMatchBanList" />
+            <OutputClaimsTransformation ReferenceId="CheckBannedPasswordValue" />
+            <OutputClaimsTransformation ReferenceId="AssertBannedPasswordFalse" />
+          </OutputClaimsTransformations>
+        </TechnicalProfile>     
       </TechnicalProfiles>
     </ClaimsProvider>
 
